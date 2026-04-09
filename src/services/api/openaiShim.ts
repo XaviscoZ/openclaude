@@ -83,6 +83,7 @@ interface OpenAIMessage {
     type: 'function'
     function: { name: string; arguments: string }
     extra_content?: Record<string, unknown>
+    [key: string]: unknown
   }>
   tool_call_id?: string
   name?: string
@@ -381,6 +382,7 @@ interface OpenAIStreamChunk {
         type?: string
         function?: { name?: string; arguments?: string }
         extra_content?: Record<string, unknown>
+        [key: string]: unknown
       }>
     }
     finish_reason: string | null
@@ -422,7 +424,7 @@ async function* openaiStreamToAnthropic(
 ): AsyncGenerator<AnthropicStreamEvent> {
   const messageId = makeMessageId()
   let contentBlockIndex = 0
-  const activeToolCalls = new Map<number, { id: string; name: string; index: number; jsonBuffer: string }>()
+  const activeToolCalls = new Map<number, { id: string; name: string; index: number; jsonBuffer: string; extra_content?: Record<string, unknown> }>()
   let hasEmittedContentStart = false
   let lastStopReason: 'tool_use' | 'max_tokens' | 'end_turn' | null = null
   let hasEmittedFinalUsage = false
@@ -501,7 +503,10 @@ async function* openaiStreamToAnthropic(
         // Tool calls
         if (delta.tool_calls) {
           for (const tc of delta.tool_calls) {
-            if (tc.id && tc.function?.name) {
+            const { index, id, type, function: fn, extra_content: _ec, ...rest } = tc
+            const combinedExtra = { ...(_ec as Record<string, unknown> ?? {}), ...(rest as Record<string, unknown>) }
+
+            if (id && fn?.name) {
               // New tool call starting
               if (hasEmittedContentStart) {
                 yield {
@@ -513,11 +518,12 @@ async function* openaiStreamToAnthropic(
               }
 
               const toolBlockIndex = contentBlockIndex
-              activeToolCalls.set(tc.index, {
-                id: tc.id,
-                name: tc.function.name,
+              activeToolCalls.set(index, {
+                id,
+                name: fn.name,
                 index: toolBlockIndex,
-                jsonBuffer: tc.function.arguments ?? '',
+                jsonBuffer: fn.arguments ?? '',
+                ...(Object.keys(combinedExtra).length > 0 ? { extra_content: combinedExtra } : {}),
               })
 
               yield {
@@ -525,39 +531,42 @@ async function* openaiStreamToAnthropic(
                 index: toolBlockIndex,
                 content_block: {
                   type: 'tool_use',
-                  id: tc.id,
-                  name: tc.function.name,
+                  id,
+                  name: fn.name,
                   input: {},
-                  ...(tc.extra_content ? { extra_content: tc.extra_content } : {}),
+                  ...(Object.keys(combinedExtra).length > 0 ? { extra_content: combinedExtra } : {}),
                 },
               }
               contentBlockIndex++
 
               // Emit any initial arguments
-              if (tc.function.arguments) {
+              if (fn.arguments) {
                 yield {
                   type: 'content_block_delta',
                   index: toolBlockIndex,
                   delta: {
                     type: 'input_json_delta',
-                    partial_json: tc.function.arguments,
+                    partial_json: fn.arguments,
                   },
                 }
               }
-            } else if (tc.function?.arguments) {
+            } else {
               // Continuation of existing tool call
-              const active = activeToolCalls.get(tc.index)
+              const active = activeToolCalls.get(index)
               if (active) {
-                if (tc.function.arguments) {
-                  active.jsonBuffer += tc.function.arguments
+                if (fn?.arguments) {
+                  active.jsonBuffer += fn.arguments
+                  yield {
+                    type: 'content_block_delta',
+                    index: active.index,
+                    delta: {
+                      type: 'input_json_delta',
+                      partial_json: fn.arguments,
+                    },
+                  }
                 }
-                yield {
-                  type: 'content_block_delta',
-                  index: active.index,
-                  delta: {
-                    type: 'input_json_delta',
-                    partial_json: tc.function.arguments,
-                  },
+                if (Object.keys(combinedExtra).length > 0) {
+                  active.extra_content = { ...(active.extra_content ?? {}), ...combinedExtra }
                 }
               }
             }
@@ -1013,18 +1022,21 @@ class OpenAIShimMessages {
 
     if (choice?.message?.tool_calls) {
       for (const tc of choice.message.tool_calls) {
+        const { id, function: fn, extra_content: _ec, ...rest } = tc as any
+        const combinedExtra = { ...(_ec ?? {}), ...rest }
+
         let input: unknown
         try {
-          input = JSON.parse(tc.function.arguments)
+          input = JSON.parse(fn.arguments)
         } catch {
-          input = { raw: tc.function.arguments }
+          input = { raw: fn.arguments }
         }
         content.push({
           type: 'tool_use',
-          id: tc.id,
-          name: tc.function.name,
+          id: id,
+          name: fn.name,
           input,
-          ...(tc.extra_content ? { extra_content: tc.extra_content } : {}),
+          ...(Object.keys(combinedExtra).length > 0 ? { extra_content: combinedExtra } : {}),
         })
       }
     }
@@ -1087,7 +1099,10 @@ export function createOpenAIShimClient(options: {
       process.env.GEMINI_BASE_URL ??
       'https://generativelanguage.googleapis.com/v1beta/openai'
     process.env.OPENAI_API_KEY ??=
-      process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? ''
+      process.env.GEMINI_OAUTH_TOKEN ??
+      process.env.GEMINI_API_KEY ??
+      process.env.GOOGLE_API_KEY ??
+      ''
     if (process.env.GEMINI_MODEL && !process.env.OPENAI_MODEL) {
       process.env.OPENAI_MODEL = process.env.GEMINI_MODEL
     }

@@ -1759,13 +1759,14 @@ export function stripCallerFieldFromAssistantMessage(
         if (block.type !== 'tool_use') {
           return block
         }
-        // Explicitly construct with only standard API fields
+        // Explicitly construct with only standard API fields, but preserve extra_content
         return {
           type: 'tool_use' as const,
           id: block.id,
           name: block.name,
           input: block.input,
-        }
+          ...(block.extra_content ? { extra_content: block.extra_content } : {}),
+        } as any
       }),
     },
   }
@@ -2230,13 +2231,16 @@ export function normalizeMessagesForAPI(
 
                   // When tool search is NOT enabled, explicitly construct tool_use
                   // block with only standard API fields to avoid sending fields like
-                  // 'caller' that may be stored in sessions from tool search runs
+                  // 'caller' that may be stored in sessions from tool search runs,
+                  // but preserve extra_content for provider-specific fields like
+                  // thought_signature
                   return {
                     type: 'tool_use' as const,
                     id: block.id,
                     name: canonicalName,
                     input: normalizedInput,
-                  }
+                    ...(block.extra_content ? { extra_content: block.extra_content } : {}),
+                  } as any
                 }
                 return block
               }),

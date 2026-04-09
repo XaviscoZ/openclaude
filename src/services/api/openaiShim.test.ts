@@ -218,10 +218,8 @@ test('preserves Gemini tool call extra_content in follow-up requests', async () 
       name: 'Bash',
       arguments: JSON.stringify({ command: 'pwd' }),
     },
-    extra_content: {
-      google: {
-        thought_signature: 'sig-123',
-      },
+    google: {
+      thought_signature: 'sig-123',
     },
   })
 })

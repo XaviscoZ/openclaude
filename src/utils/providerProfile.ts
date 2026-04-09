@@ -32,6 +32,7 @@ const PROFILE_ENV_KEYS = [
   'CHATGPT_ACCOUNT_ID',
   'CODEX_ACCOUNT_ID',
   'GEMINI_API_KEY',
+  'GEMINI_OAUTH_TOKEN',
   'GEMINI_MODEL',
   'GEMINI_BASE_URL',
   'GOOGLE_API_KEY',
@@ -41,6 +42,7 @@ const SECRET_ENV_KEYS = [
   'OPENAI_API_KEY',
   'CODEX_API_KEY',
   'GEMINI_API_KEY',
+  'GEMINI_OAUTH_TOKEN',
   'GOOGLE_API_KEY',
 ] as const
 
@@ -54,6 +56,7 @@ export type ProfileEnv = {
   CHATGPT_ACCOUNT_ID?: string
   CODEX_ACCOUNT_ID?: string
   GEMINI_API_KEY?: string
+  GEMINI_OAUTH_TOKEN?: string
   GEMINI_MODEL?: string
   GEMINI_BASE_URL?: string
 }
@@ -220,6 +223,7 @@ export function buildGeminiProfileEnv(options: {
   model?: string | null
   baseUrl?: string | null
   apiKey?: string | null
+  oauthToken?: string | null
   processEnv?: NodeJS.ProcessEnv
 }): ProfileEnv | null {
   const processEnv = options.processEnv ?? process.env
@@ -228,27 +232,44 @@ export function buildGeminiProfileEnv(options: {
       processEnv.GEMINI_API_KEY ??
       processEnv.GOOGLE_API_KEY,
   )
-  if (!key) {
+  const oauthToken = sanitizeApiKey(
+    options.oauthToken ?? processEnv.GEMINI_OAUTH_TOKEN,
+  )
+  if (!key && !oauthToken) {
     return null
   }
 
   const env: ProfileEnv = {
     GEMINI_MODEL:
-      sanitizeProviderConfigValue(options.model, { GEMINI_API_KEY: key }, processEnv) ||
+      sanitizeProviderConfigValue(
+        options.model,
+        { GEMINI_API_KEY: key, GEMINI_OAUTH_TOKEN: oauthToken },
+        processEnv,
+      ) ||
       sanitizeProviderConfigValue(
         processEnv.GEMINI_MODEL,
-        { GEMINI_API_KEY: key },
+        { GEMINI_API_KEY: key, GEMINI_OAUTH_TOKEN: oauthToken },
         processEnv,
       ) ||
       DEFAULT_GEMINI_MODEL,
-    GEMINI_API_KEY: key,
+  }
+
+  if (key) {
+    env.GEMINI_API_KEY = key
+  }
+  if (oauthToken) {
+    env.GEMINI_OAUTH_TOKEN = oauthToken
   }
 
   const baseUrl =
-    sanitizeProviderConfigValue(options.baseUrl, { GEMINI_API_KEY: key }, processEnv) ||
+    sanitizeProviderConfigValue(
+      options.baseUrl,
+      { GEMINI_API_KEY: key, GEMINI_OAUTH_TOKEN: oauthToken },
+      processEnv,
+    ) ||
     sanitizeProviderConfigValue(
       processEnv.GEMINI_BASE_URL,
-      { GEMINI_API_KEY: key },
+      { GEMINI_API_KEY: key, GEMINI_OAUTH_TOKEN: oauthToken },
       processEnv,
     )
   if (baseUrl) {
@@ -465,6 +486,8 @@ export async function buildLaunchEnv(options: {
     processEnv.GEMINI_API_KEY ?? processEnv.GOOGLE_API_KEY,
   )
   const persistedGeminiKey = sanitizeApiKey(persistedEnv.GEMINI_API_KEY)
+  const shellGeminiOAuthToken = sanitizeApiKey(processEnv.GEMINI_OAUTH_TOKEN)
+  const persistedGeminiOAuthToken = sanitizeApiKey(persistedEnv.GEMINI_OAUTH_TOKEN)
 
   if (options.profile === 'gemini') {
     const env: NodeJS.ProcessEnv = {
@@ -489,6 +512,13 @@ export async function buildLaunchEnv(options: {
       env.GEMINI_API_KEY = geminiKey
     } else {
       delete env.GEMINI_API_KEY
+    }
+
+    const geminiOAuthToken = shellGeminiOAuthToken || persistedGeminiOAuthToken
+    if (geminiOAuthToken) {
+      env.GEMINI_OAUTH_TOKEN = geminiOAuthToken
+    } else {
+      delete env.GEMINI_OAUTH_TOKEN
     }
 
     delete env.GOOGLE_API_KEY

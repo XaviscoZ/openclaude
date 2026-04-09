@@ -60,8 +60,10 @@ type Step =
       baseUrl: string | null
       defaultModel: string
     }
+  | { name: 'gemini' }
   | { name: 'gemini-key' }
-  | { name: 'gemini-model'; apiKey: string }
+  | { name: 'gemini-oauth' }
+  | { name: 'gemini-model'; apiKey?: string; oauthToken?: string }
   | { name: 'codex-check' }
 
 type CurrentProviderSummary = {
@@ -216,7 +218,7 @@ function buildSavedProfileSummary(
           env,
         ),
         credentialLabel:
-          maskSecretForDisplay(env.GEMINI_API_KEY) !== undefined
+          maskSecretForDisplay(env.GEMINI_API_KEY ?? env.GEMINI_OAUTH_TOKEN) !== undefined
             ? 'configured'
             : undefined,
       }
@@ -427,7 +429,7 @@ function ProviderChooser({
     {
       label: 'Gemini',
       value: 'gemini',
-      description: 'Use a Google Gemini API key',
+      description: 'Use a Google Gemini API key or OAuth token',
     },
     {
       label: 'Codex',
@@ -926,7 +928,7 @@ export function ProviderWizard({
                 defaultModel: defaults.openAIModel,
               })
             } else if (value === 'gemini') {
-              setStep({ name: 'gemini-key' })
+              setStep({ name: 'gemini' })
             } else if (value === 'clear') {
               const filePath = deleteProfileFile()
               onDone(`Removed saved provider profile at ${filePath}. Restart OpenClaude to go back to normal startup.`, {
@@ -1066,11 +1068,42 @@ export function ProviderWizard({
         />
       )
 
+    case 'gemini':
+      return (
+        <Dialog title="Gemini setup" onCancel={() => setStep({ name: 'choose' })}>
+          <Box flexDirection="column" gap={1}>
+            <Text>Choose an authentication method for Gemini.</Text>
+            <Select
+              options={[
+                {
+                  label: 'API Key',
+                  value: 'key',
+                  description: 'Use a Google AI Studio API key (AIza...)',
+                },
+                {
+                  label: 'OAuth Token',
+                  value: 'oauth',
+                  description: 'Use a Google Cloud / Vertex AI OAuth access token',
+                },
+              ]}
+              onChange={value => {
+                if (value === 'key') {
+                  setStep({ name: 'gemini-key' })
+                } else {
+                  setStep({ name: 'gemini-oauth' })
+                }
+              }}
+              onCancel={() => setStep({ name: 'choose' })}
+            />
+          </Box>
+        </Dialog>
+      )
+
     case 'gemini-key':
       return (
         <TextEntryDialog
           resetStateKey={step.name}
-          title="Gemini setup"
+          title="Gemini setup (API Key)"
           subtitle="Step 1 of 2"
           description={
             process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY
@@ -1091,7 +1124,30 @@ export function ProviderWizard({
               ''
             setStep({ name: 'gemini-model', apiKey })
           }}
-          onCancel={() => setStep({ name: 'choose' })}
+          onCancel={() => setStep({ name: 'gemini' })}
+        />
+      )
+
+    case 'gemini-oauth':
+      return (
+        <TextEntryDialog
+          resetStateKey={step.name}
+          title="Gemini setup (OAuth)"
+          subtitle="Step 1 of 2"
+          description={
+            process.env.GEMINI_OAUTH_TOKEN
+              ? 'Enter an OAuth token, or leave this blank to reuse the current GEMINI_OAUTH_TOKEN from this session.'
+              : 'Enter a Google OAuth access token (e.g. from gcloud auth print-access-token).'
+          }
+          initialValue=""
+          placeholder="ya29.A0..."
+          mask="*"
+          allowEmpty={Boolean(process.env.GEMINI_OAUTH_TOKEN)}
+          onSubmit={value => {
+            const oauthToken = value.trim() || process.env.GEMINI_OAUTH_TOKEN || ''
+            setStep({ name: 'gemini-model', oauthToken })
+          }}
+          onCancel={() => setStep({ name: 'gemini' })}
         />
       )
 
@@ -1108,6 +1164,7 @@ export function ProviderWizard({
           onSubmit={value => {
             const env = buildGeminiProfileEnv({
               apiKey: step.apiKey,
+              oauthToken: step.oauthToken,
               model: value.trim() || DEFAULT_GEMINI_MODEL,
               processEnv: {},
             })
@@ -1115,7 +1172,11 @@ export function ProviderWizard({
               finishProfileSave(onDone, 'gemini', env)
             }
           }}
-          onCancel={() => setStep({ name: 'gemini-key' })}
+          onCancel={() =>
+            setStep({
+              name: step.apiKey ? 'gemini-key' : 'gemini-oauth',
+            })
+          }
         />
       )
 

@@ -360,12 +360,24 @@ test('gemini profiles accept google api key fallback', () => {
   })
 })
 
-test('gemini profiles require a key', () => {
+test('gemini profiles require a key or oauth token', () => {
   const env = buildGeminiProfileEnv({
     processEnv: {},
   })
 
   assert.equal(env, null)
+})
+
+test('gemini profiles accept explicit oauth token', () => {
+  const env = buildGeminiProfileEnv({
+    oauthToken: 'ya29.test',
+    processEnv: {},
+  })
+
+  assert.deepEqual(env, {
+    GEMINI_MODEL: 'gemini-2.0-flash',
+    GEMINI_OAUTH_TOKEN: 'ya29.test',
+  })
 })
 
 test('saveProfileFile writes a profile that loadProfileFile can read back', () => {
@@ -598,4 +610,21 @@ test('atomic-chat launch ignores mismatched persisted openai env', async () => {
   assert.equal(env.OPENAI_API_KEY, undefined)
   assert.equal(env.CODEX_API_KEY, undefined)
   assert.equal(env.CHATGPT_ACCOUNT_ID, undefined)
+})
+
+test('matching persisted gemini oauth env is reused for gemini launch', async () => {
+  const env = await buildLaunchEnv({
+    profile: 'gemini',
+    persisted: profile('gemini', {
+      GEMINI_MODEL: 'gemini-2.5-flash',
+      GEMINI_OAUTH_TOKEN: 'ya29.persisted',
+    }),
+    goal: 'balanced',
+    processEnv: {},
+  })
+
+  assert.equal(env.CLAUDE_CODE_USE_GEMINI, '1')
+  assert.equal(env.GEMINI_MODEL, 'gemini-2.5-flash')
+  assert.equal(env.GEMINI_OAUTH_TOKEN, 'ya29.persisted')
+  assert.equal(env.GEMINI_API_KEY, undefined)
 })

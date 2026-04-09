@@ -2130,6 +2130,14 @@ async function* queryModel(
                   }
                   contentBlock.input += delta.partial_json
                   break
+                case 'extra_content_delta':
+                  if (contentBlock.type === 'tool_use') {
+                    contentBlock.extra_content = {
+                      ...(contentBlock.extra_content ?? {}),
+                      ...(delta as any).extra_content,
+                    }
+                  }
+                  break
                 case 'text_delta':
                   if (contentBlock.type !== 'text') {
                     logEvent('tengu_streaming_error', {
